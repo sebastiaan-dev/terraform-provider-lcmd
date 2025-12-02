@@ -1,4 +1,4 @@
-module github.com/hashicorp/terraform-provider-scaffolding-framework
+module terraform-provider-lcmd
 
 go 1.24.0
 
