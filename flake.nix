@@ -1,5 +1,5 @@
 {
-  description = "Description for the project";
+  description = "Development environment for terraform-provider-lcmd";
 
   inputs = {
     devenv-root = {
@@ -51,10 +51,27 @@
           lib,
           ...
         }:
+        let
+          # Override the provider installation to use the local provider
+          terraformRc = pkgs.writeText "source.tfrc" ''
+            provider_installation {
+
+              dev_overrides {
+                "non-existent.nl/edu/lcmd" = "../.devenv/state/go/bin"
+              }
+
+              # For all other providers, install them directly from their origin provider
+              # registries as normal.
+              direct {}
+            }
+          '';
+        in
         {
           # Per-system attributes can be defined here. The self' and inputs'
           # module parameters provide easy access to attributes of the same
           # system.
+
+          # Enable unfree packages.
           _module.args.pkgs = import self.inputs.nixpkgs {
             inherit system;
             config.allowUnfreePredicate =
@@ -65,7 +82,7 @@
           };
 
           devenv.shells.default = {
-            name = "my-project";
+            name = "terraform-provider-lcmd";
 
             languages.go.enable = true;
 
@@ -78,7 +95,24 @@
             ];
 
             # https://devenv.sh/reference/options/
-            packages = [ ];
+            packages = [
+              pkgs.terraform
+              # Make `lzc-cli` available in PATH and delegate to `yarn lzc-cli`
+              (pkgs.writeShellScriptBin "lzc-cli" ''
+                #!${pkgs.bash}/bin/bash
+                set -euo pipefail
+
+                # devenv sets DEVENV_ROOT to your project root
+                cd "''${DEVENV_ROOT:-.}"
+
+                yarn lzc-cli "$@"
+              '')
+            ];
+
+            env = {
+              TERRAFORM_CONFIG = terraformRc;
+              TF_LOG = "TRACE";
+            };
           };
 
         };
