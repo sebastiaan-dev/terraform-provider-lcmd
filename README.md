@@ -78,3 +78,7 @@ In order to run the full suite of Acceptance tests, run `make testacc`.
 ```shell
 make testacc
 ```
+
+## Publishing
+
+To publish a new version of the provider, run `git tag vx.x.x` and `git push origin vx.x.x`.
