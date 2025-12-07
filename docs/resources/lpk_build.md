@@ -62,6 +62,7 @@ resource "lcmd_lpk_build" "example" {
 - `local_path` (String) Absolute path to the built artifact on disk.
 - `lpk_url` (String) Download URL returned by NAS registry.
 - `sha256` (String)
+- `source_hash` (String) Hash of the source directory used to detect local changes.
 - `upload_id` (String)
 - `version` (String)
 
