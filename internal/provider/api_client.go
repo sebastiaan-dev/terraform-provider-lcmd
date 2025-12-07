@@ -52,6 +52,14 @@ type apiUploadLPKResponse struct {
 	DownloadURL string `json:"download_url"`
 }
 
+type apiFileResponse struct {
+	Path          string `json:"path"`
+	Size          int64  `json:"size"`
+	SHA256        string `json:"sha256"`
+	Content       string `json:"content"`
+	ContentBase64 string `json:"content_base64"`
+}
+
 type LcmdClient struct {
 	baseURL    *url.URL
 	httpClient *http.Client
@@ -240,6 +248,23 @@ func (c *LcmdClient) UploadLPK(ctx context.Context, uid, name, version, filePath
 	}
 	var out apiUploadLPKResponse
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+func (c *LcmdClient) FetchFile(ctx context.Context, path string) (*apiFileResponse, error) {
+	if path == "" {
+		return nil, errors.New("path is required")
+	}
+	params := map[string]string{
+		"path": path,
+	}
+	if c.User != "" {
+		params["uid"] = c.User
+	}
+	var out apiFileResponse
+	if err := c.do(ctx, http.MethodGet, "/v1/files", params, nil, &out); err != nil {
 		return nil, err
 	}
 	return &out, nil

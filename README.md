@@ -78,6 +78,28 @@ resource "lcmd_lpk_build" "example" {
 
 All files beneath the source directory whose name ends with the configured template extension (defaults to `.tmpl`) are rendered using Go templates with the values from `env.variables`. The rendered content is written to a sibling file that shares the same name minus the template extension (for example, `config.yaml.tmpl` becomes `config.yaml`). If a template references a variable that is not defined, the resource raises a clear error pointing to the missing environment key. The provided variables are also exported to the build command's environment, so build tooling can reference them with standard shell expansion.
 
+### Fetching NAS files
+
+Use the `lcmd_file` data source to read certificate files or generated tokens from the NAS filesystem so you can reuse them in Terraform:
+
+```hcl
+data "lcmd_file" "nas_cert" {
+  path = "/lzcapp/certs/nas-cert.pem"
+}
+
+output "nas_cert_pem" {
+  value     = data.lcmd_file.nas_cert.content
+  sensitive = true
+}
+
+resource "local_file" "nas_cert" {
+  filename = "./nas-cert.pem"
+  content  = base64decode(data.lcmd_file.nas_cert.content_base64)
+}
+```
+
+The data source returns both UTF-8 content and a base64 representation for binary-safe workflows, along with the file size and SHA256 checksum to detect drift.
+
 ## Developing the Provider
 
 If you wish to work on the provider, you'll first need [Go](http://www.golang.org) installed on your machine (see [Requirements](#requirements) above).

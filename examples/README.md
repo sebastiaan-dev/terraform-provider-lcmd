@@ -29,3 +29,7 @@ Use variables (or environment variables) to set those values so that the same co
 2. `resource "lcmd_app" "zitadel"` installs the freshly built package using the `lpk_url` emitted by the build resource. Toggling the `zitadel_ephemeral` variable changes whether uninstalling the resource clears persisted app data.
 
 Supplying variables such as `zitadel_source_path` and `zitadel_master_key` keeps secrets and file paths out of version control while still allowing the example to run unchanged.
+
+## File data source
+
+`examples/data-sources/lcmd_file/data-source.tf` shows how to fetch an arbitrary file from the NAS filesystem so that Terraform can output or persist it elsewhere. This is useful for downloading generated certificates or tokens after provisioning.

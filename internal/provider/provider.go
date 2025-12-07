@@ -110,7 +110,9 @@ func (p *LcmdProvider) EphemeralResources(ctx context.Context) []func() ephemera
 }
 
 func (p *LcmdProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewFileDataSource,
+	}
 }
 
 func (p *LcmdProvider) Functions(ctx context.Context) []func() function.Function {
