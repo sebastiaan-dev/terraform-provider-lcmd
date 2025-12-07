@@ -36,17 +36,18 @@ type LPKBuildResource struct {
 }
 
 type LPKBuildModel struct {
-	ID        types.String          `tfsdk:"id"`
-	Source    *LPKBuildSourceModel  `tfsdk:"source"`
-	Build     *LPKBuildBuildModel   `tfsdk:"build"`
-	Publish   *LPKBuildPublishModel `tfsdk:"publish"`
-	Env       *LPKBuildEnvModel     `tfsdk:"env"`
-	LPKURL    types.String          `tfsdk:"lpk_url"`
-	SHA256    types.String          `tfsdk:"sha256"`
-	AppID     types.String          `tfsdk:"appid"`
-	Version   types.String          `tfsdk:"version"`
-	LocalPath types.String          `tfsdk:"local_path"`
-	UploadID  types.String          `tfsdk:"upload_id"`
+	ID         types.String          `tfsdk:"id"`
+	Source     *LPKBuildSourceModel  `tfsdk:"source"`
+	Build      *LPKBuildBuildModel   `tfsdk:"build"`
+	Publish    *LPKBuildPublishModel `tfsdk:"publish"`
+	Env        *LPKBuildEnvModel     `tfsdk:"env"`
+	LPKURL     types.String          `tfsdk:"lpk_url"`
+	SHA256     types.String          `tfsdk:"sha256"`
+	AppID      types.String          `tfsdk:"appid"`
+	Version    types.String          `tfsdk:"version"`
+	LocalPath  types.String          `tfsdk:"local_path"`
+	UploadID   types.String          `tfsdk:"upload_id"`
+	SourceHash types.String          `tfsdk:"source_hash"`
 }
 
 type LPKBuildSourceModel struct {
@@ -122,6 +123,13 @@ func (r *LPKBuildResource) Schema(_ context.Context, _ resource.SchemaRequest, r
 				Description: "Absolute path to the built artifact on disk.",
 			},
 			"upload_id": schema.StringAttribute{Computed: true},
+			"source_hash": schema.StringAttribute{
+				Computed:    true,
+				Description: "Hash of the source directory used to detect local changes.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
 			"source": schema.SingleNestedAttribute{
 				Required: true,
 				Attributes: map[string]schema.Attribute{
@@ -212,6 +220,29 @@ func (r *LPKBuildResource) Read(ctx context.Context, req resource.ReadRequest, r
 		resp.State.RemoveResource(ctx)
 		return
 	}
+	if state.Source == nil {
+		resp.Diagnostics.AddError("Missing source", "state is missing source definition")
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	path, cleanup, err := r.prepareSource(ctx, state.Source)
+	if err != nil {
+		resp.Diagnostics.AddError("Source error", err.Error())
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	if cleanup != nil {
+		defer cleanup()
+	}
+	fingerprint, err := hashDirectory(path)
+	if err != nil {
+		resp.Diagnostics.AddError("Hash error", err.Error())
+		return
+	}
+	if state.SourceHash.IsNull() || state.SourceHash.ValueString() != fingerprint {
+		resp.State.RemoveResource(ctx)
+		return
+	}
 	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
 }
 
@@ -263,6 +294,11 @@ func (r *LPKBuildResource) applyBuild(ctx context.Context, data *LPKBuildModel, 
 	if cleanup != nil {
 		defer cleanup()
 	}
+	fingerprint, err := hashDirectory(workdir)
+	if err != nil {
+		return nil, fmt.Errorf("hash source: %w", err)
+	}
+	data.SourceHash = types.StringValue(fingerprint)
 	envVars := collectEnvVars(data.Env)
 	ext := resolveTemplateExtension(data.Env)
 	if err := renderTemplateFiles(workdir, ext, envVars); err != nil {
@@ -604,6 +640,61 @@ func computeSHA(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func hashDirectory(root string) (string, error) {
+	hash := sha256.New()
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			if rel == ".git" || rel == ".terraform" {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if entry.Type()&os.ModeSymlink != 0 {
+			return nil
+		}
+		if !shouldHashFile(entry.Name()) {
+			return nil
+		}
+		hash.Write([]byte(rel))
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		if _, err := io.Copy(hash, f); err != nil {
+			f.Close()
+			return err
+		}
+		f.Close()
+		return nil
+	})
+	if err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func shouldHashFile(name string) bool {
+	if strings.HasSuffix(name, ".tmpl") {
+		return true
+	}
+	if strings.HasSuffix(name, ".j2") || strings.HasSuffix(name, ".jinja") {
+		return true
+	}
+	switch name {
+	case "manifest.yml", "lzc-manifest.yml", "lzc-build.yml":
+		return true
+	default:
+		return false
+	}
 }
 
 func canReuseUpload(prior *LPKBuildModel, meta *lpkMetadata) bool {
