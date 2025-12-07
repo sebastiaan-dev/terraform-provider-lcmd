@@ -1,16 +1,16 @@
 # Copyright (c) HashiCorp, Inc.
 
 resource "lcmd_app" "example" {
-  lpk_url   = var.lcmd_lpk_url
-  ephemeral = var.lcmd_ephemeral
+  lpk_url   = var.example_lpk_url
+  ephemeral = var.example_ephemeral
 }
 
-variable "lcmd_lpk_url" {
-  description = "LPK package URL to install (https://…)"
+variable "example_lpk_url" {
+  description = "URL of the LPK to deploy"
   type        = string
 }
 
-variable "lcmd_ephemeral" {
+variable "example_ephemeral" {
   description = "Whether to clear app data when the resource is destroyed"
   type        = bool
   default     = false

@@ -5,14 +5,16 @@ package provider
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
+	"os"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -41,14 +43,22 @@ type apiUser struct {
 	Nickname string `json:"nickname"`
 }
 
+type apiUploadLPKResponse struct {
+	ID          string `json:"id"`
+	UID         string `json:"uid"`
+	Name        string `json:"name"`
+	Version     string `json:"version"`
+	SHA256      string `json:"sha256"`
+	DownloadURL string `json:"download_url"`
+}
+
 type LcmdClient struct {
 	baseURL    *url.URL
 	httpClient *http.Client
-	authHeader string
 	User       string
 }
 
-func newAPIClient(endpoint, username, password string) (*LcmdClient, error) {
+func newAPIClient(endpoint string) (*LcmdClient, error) {
 	if endpoint == "" {
 		return nil, errors.New("endpoint is required")
 	}
@@ -56,13 +66,11 @@ func newAPIClient(endpoint, username, password string) (*LcmdClient, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid endpoint: %w", err)
 	}
-	auth := "Basic " + base64.StdEncoding.EncodeToString([]byte(username+":"+password))
 	return &LcmdClient{
 		baseURL: parsed,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 		},
-		authHeader: auth,
 	}, nil
 }
 
@@ -165,7 +173,6 @@ func (c *LcmdClient) doRaw(ctx context.Context, method string, p string, query m
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Set("Authorization", c.authHeader)
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}
@@ -186,4 +193,54 @@ func (c *LcmdClient) doRaw(ctx context.Context, method string, p string, query m
 		return nil, err
 	}
 	return data, nil
+}
+
+func (c *LcmdClient) UploadLPK(ctx context.Context, uid, name, version, filePath string) (*apiUploadLPKResponse, error) {
+	if uid == "" {
+		return nil, errors.New("uid is required for upload")
+	}
+	f, err := os.Open(filePath)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	if err := writer.WriteField("uid", uid); err != nil {
+		return nil, err
+	}
+	if name != "" {
+		_ = writer.WriteField("name", name)
+	}
+	if version != "" {
+		_ = writer.WriteField("version", version)
+	}
+	part, err := writer.CreateFormFile("package", filepath.Base(filePath))
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return nil, err
+	}
+	writer.Close()
+	endpoint := c.buildURL("/v1/lpks", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, body)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		msg, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("upload failed: %s", strings.TrimSpace(string(msg)))
+	}
+	var out apiUploadLPKResponse
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return &out, nil
 }

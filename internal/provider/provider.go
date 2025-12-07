@@ -34,8 +34,6 @@ type LcmdProvider struct {
 // LcmdProviderModel describes the provider data model.
 type LcmdProviderModel struct {
 	Endpoint types.String `tfsdk:"endpoint"`
-	Username types.String `tfsdk:"username"`
-	Password types.String `tfsdk:"password"`
 	User     types.String `tfsdk:"user"`
 }
 
@@ -50,15 +48,6 @@ func (p *LcmdProvider) Schema(ctx context.Context, req provider.SchemaRequest, r
 			"endpoint": schema.StringAttribute{
 				MarkdownDescription: "Base URL of the NAS API",
 				Required:            true,
-			},
-			"username": schema.StringAttribute{
-				MarkdownDescription: "API username used for Basic auth",
-				Required:            true,
-			},
-			"password": schema.StringAttribute{
-				MarkdownDescription: "API password used for Basic auth",
-				Required:            true,
-				Sensitive:           true,
 			},
 			"user": schema.StringAttribute{
 				MarkdownDescription: "LZC UID that owns the applications",
@@ -78,12 +67,12 @@ func (p *LcmdProvider) Configure(ctx context.Context, req provider.ConfigureRequ
 		return
 	}
 
-	if data.Endpoint.IsUnknown() || data.Endpoint.IsNull() || data.Username.IsUnknown() || data.Username.IsNull() || data.Password.IsUnknown() || data.Password.IsNull() || data.User.IsUnknown() || data.User.IsNull() {
-		resp.Diagnostics.AddError("Missing configuration", "endpoint, username, password, and user must be provided")
+	if data.Endpoint.IsUnknown() || data.Endpoint.IsNull() || data.User.IsUnknown() || data.User.IsNull() {
+		resp.Diagnostics.AddError("Missing configuration", "endpoint and user must be provided")
 		return
 	}
 
-	client, err := newAPIClient(data.Endpoint.ValueString(), data.Username.ValueString(), data.Password.ValueString())
+	client, err := newAPIClient(data.Endpoint.ValueString())
 	if err != nil {
 		resp.Diagnostics.AddError("Failed to configure API client", err.Error())
 		return
@@ -120,7 +109,9 @@ func (p *LcmdProvider) EphemeralResources(ctx context.Context) []func() ephemera
 }
 
 func (p *LcmdProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return nil
+	return []func() datasource.DataSource{
+		NewLPKBuildDataSource,
+	}
 }
 
 func (p *LcmdProvider) Functions(ctx context.Context) []func() function.Function {
