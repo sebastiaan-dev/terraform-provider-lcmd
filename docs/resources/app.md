@@ -15,17 +15,12 @@ LPK application resource for managing LPK packages on the system
 ```terraform
 # Copyright (c) HashiCorp, Inc.
 
-resource "lcmd_app" "example" {
-  lpk_url   = var.example_lpk_url
-  ephemeral = var.example_ephemeral
+resource "lcmd_app" "zitadel" {
+  lpk_url   = "https://example.com/file.lpk"
+  ephemeral = var.zitadel_ephemeral
 }
 
-variable "example_lpk_url" {
-  description = "URL of the LPK to deploy"
-  type        = string
-}
-
-variable "example_ephemeral" {
+variable "zitadel_ephemeral" {
   description = "Whether to clear app data when the resource is destroyed"
   type        = bool
   default     = false

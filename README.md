@@ -36,10 +36,25 @@ Then commit the changes to `go.mod` and `go.sum`.
 
 ## Using the provider
 
-The `lcmd_lpk_build` data source builds an LPK from a local or git source, optionally publishes it, and exposes details such as the download URL and SHA. You can now provide build-time environment variables and template rendering instructions via the optional `env` block:
+The `lcmd_lpk_build` resource builds an LPK from a local or git source, optionally publishes it, and exposes details such as the download URL and SHA. You can provide build-time environment variables and template rendering instructions via the optional `env` block:
 
 ```hcl
-data "lcmd_lpk_build" "example" {
+provider "lcmd" {
+  endpoint = var.lcmd_endpoint
+  user     = var.lcmd_user
+}
+
+variable "lcmd_endpoint" {
+  description = "Base URL of the NAS API"
+  type        = string
+}
+
+variable "lcmd_user" {
+  description = "UID of the user that owns the applications"
+  type        = string
+}
+
+resource "lcmd_lpk_build" "example" {
   source {
     local {
       path = "./app"
@@ -61,7 +76,7 @@ data "lcmd_lpk_build" "example" {
 }
 ```
 
-All files beneath the source directory whose name ends with the configured template extension (defaults to `.tmpl`) are rendered using Go templates with the values from `env.variables`. The rendered content is written to a sibling file that shares the same name minus the template extension (for example, `config.yaml.tmpl` becomes `config.yaml`). If a template references a variable that is not defined, the data source now raises a clear error pointing to the missing environment key. The provided variables are also exported to the build command's environment, so build tooling can reference them with standard shell expansion.
+All files beneath the source directory whose name ends with the configured template extension (defaults to `.tmpl`) are rendered using Go templates with the values from `env.variables`. The rendered content is written to a sibling file that shares the same name minus the template extension (for example, `config.yaml.tmpl` becomes `config.yaml`). If a template references a variable that is not defined, the resource raises a clear error pointing to the missing environment key. The provided variables are also exported to the build command's environment, so build tooling can reference them with standard shell expansion.
 
 ## Developing the Provider
 

@@ -18,18 +18,20 @@ import (
 	"strings"
 	"text/template"
 
-	datasourcevalidator "github.com/hashicorp/terraform-plugin-framework-validators/datasourcevalidator"
-	"github.com/hashicorp/terraform-plugin-framework/datasource"
-	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	resourcevalidator "github.com/hashicorp/terraform-plugin-framework-validators/resourcevalidator"
 	"github.com/hashicorp/terraform-plugin-framework/path"
-	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
+	"github.com/hashicorp/terraform-plugin-framework/resource"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
+	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"gopkg.in/yaml.v3"
 )
 
-var _ datasource.DataSource = &LPKBuildDataSource{}
+var _ resource.Resource = &LPKBuildResource{}
+var _ resource.ResourceWithConfigValidators = &LPKBuildResource{}
 
-type LPKBuildDataSource struct {
+type LPKBuildResource struct {
 	client *LcmdClient
 }
 
@@ -79,89 +81,78 @@ type LPKBuildEnvModel struct {
 
 const defaultTemplateExtension = ".tmpl"
 
-func NewLPKBuildDataSource() datasource.DataSource {
-	return &LPKBuildDataSource{}
+func NewLPKBuildResource() resource.Resource {
+	return &LPKBuildResource{}
 }
 
-func (d *LPKBuildDataSource) Metadata(_ context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
+func (r *LPKBuildResource) Metadata(_ context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
 	resp.TypeName = req.ProviderTypeName + "_lpk_build"
 }
 
-func (d *LPKBuildDataSource) ConfigValidators(_ context.Context) []datasource.ConfigValidator {
-	return []datasource.ConfigValidator{
-		// At least one of local/git must be set
-		datasourcevalidator.AtLeastOneOf(
+func (r *LPKBuildResource) ConfigValidators(_ context.Context) []resource.ConfigValidator {
+	return []resource.ConfigValidator{
+		resourcevalidator.AtLeastOneOf(
 			path.MatchRoot("source").AtName("local"),
 			path.MatchRoot("source").AtName("git"),
 		),
-		// They must not both be set at the same time
-		datasourcevalidator.Conflicting(
+		resourcevalidator.Conflicting(
 			path.MatchRoot("source").AtName("local"),
 			path.MatchRoot("source").AtName("git"),
 		),
 	}
 }
 
-func (d *LPKBuildDataSource) Schema(_ context.Context, _ datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+func (r *LPKBuildResource) Schema(_ context.Context, _ resource.SchemaRequest, resp *resource.SchemaResponse) {
 	resp.Schema = schema.Schema{
 		Description: "Builds an LPK from source and optionally uploads it to the NAS registry.",
 		Attributes: map[string]schema.Attribute{
-			"id":         schema.StringAttribute{Computed: true},
-			"lpk_url":    schema.StringAttribute{Computed: true, Description: "Download URL returned by NAS registry."},
-			"sha256":     schema.StringAttribute{Computed: true},
-			"appid":      schema.StringAttribute{Computed: true},
-			"version":    schema.StringAttribute{Computed: true},
-			"local_path": schema.StringAttribute{Computed: true},
-			"upload_id":  schema.StringAttribute{Computed: true},
+			"id": schema.StringAttribute{
+				Computed:    true,
+				Description: "Internal identifier derived from manifest metadata.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
+			},
+			"lpk_url": schema.StringAttribute{Computed: true, Description: "Download URL returned by NAS registry."},
+			"sha256":  schema.StringAttribute{Computed: true},
+			"appid":   schema.StringAttribute{Computed: true},
+			"version": schema.StringAttribute{Computed: true},
+			"local_path": schema.StringAttribute{
+				Computed:    true,
+				Description: "Absolute path to the built artifact on disk.",
+			},
+			"upload_id": schema.StringAttribute{Computed: true},
 			"source": schema.SingleNestedAttribute{
 				Required: true,
 				Attributes: map[string]schema.Attribute{
 					"local": schema.SingleNestedAttribute{
 						Optional: true,
 						Attributes: map[string]schema.Attribute{
-							"path": schema.StringAttribute{
-								Required: true,
-							},
+							"path": schema.StringAttribute{Required: true},
 						},
 					},
 					"git": schema.SingleNestedAttribute{
 						Optional: true,
 						Attributes: map[string]schema.Attribute{
-							"url": schema.StringAttribute{
-								Required: true,
-							},
-							"ref": schema.StringAttribute{
-								Optional: true,
-							},
-							"subpath": schema.StringAttribute{
-								Optional: true,
-							},
+							"url":     schema.StringAttribute{Required: true},
+							"ref":     schema.StringAttribute{Optional: true},
+							"subpath": schema.StringAttribute{Optional: true},
 						},
 					},
 				},
-				Validators: []validator.Object{},
 			},
 		},
-
 		Blocks: map[string]schema.Block{
 			"build": schema.SingleNestedBlock{
 				Attributes: map[string]schema.Attribute{
-					"command": schema.StringAttribute{
-						Optional: true,
-					},
+					"command": schema.StringAttribute{Optional: true},
 				},
 			},
 			"publish": schema.SingleNestedBlock{
 				Attributes: map[string]schema.Attribute{
-					"enabled": schema.BoolAttribute{
-						Optional: true,
-					},
-					"name": schema.StringAttribute{
-						Optional: true,
-					},
-					"version": schema.StringAttribute{
-						Optional: true,
-					},
+					"enabled": schema.BoolAttribute{Optional: true},
+					"name":    schema.StringAttribute{Optional: true},
+					"version": schema.StringAttribute{Optional: true},
 				},
 			},
 			"env": schema.SingleNestedBlock{
@@ -181,32 +172,93 @@ func (d *LPKBuildDataSource) Schema(_ context.Context, _ datasource.SchemaReques
 	}
 }
 
-func (d *LPKBuildDataSource) Configure(_ context.Context, req datasource.ConfigureRequest, resp *datasource.ConfigureResponse) {
+func (r *LPKBuildResource) Configure(_ context.Context, req resource.ConfigureRequest, resp *resource.ConfigureResponse) {
 	if req.ProviderData == nil {
 		return
 	}
 	client, ok := req.ProviderData.(*LcmdClient)
 	if !ok {
-		resp.Diagnostics.AddError("Unexpected DataSource Configure Type", fmt.Sprintf("Expected *LcmdClient, got %T", req.ProviderData))
+		resp.Diagnostics.AddError("Unexpected Resource Configure Type", fmt.Sprintf("Expected *LcmdClient, got %T", req.ProviderData))
 		return
 	}
-	d.client = client
+	r.client = client
 }
 
-func (d *LPKBuildDataSource) Read(ctx context.Context, req datasource.ReadRequest, resp *datasource.ReadResponse) {
-	if d.client == nil {
+func (r *LPKBuildResource) Create(ctx context.Context, req resource.CreateRequest, resp *resource.CreateResponse) {
+	if r.client == nil {
 		resp.Diagnostics.AddError("Provider not configured", "")
 		return
 	}
-	var data LPKBuildModel
-	resp.Diagnostics.Append(req.Config.Get(ctx, &data)...)
+	var plan LPKBuildModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
 	if resp.Diagnostics.HasError() {
 		return
 	}
-	workdir, cleanup, err := d.prepareSource(ctx, data.Source)
+	result, err := r.applyBuild(ctx, &plan, nil)
 	if err != nil {
-		resp.Diagnostics.AddError("Source error", err.Error())
+		resp.Diagnostics.AddError("Build error", err.Error())
 		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, result)...)
+}
+
+func (r *LPKBuildResource) Read(ctx context.Context, req resource.ReadRequest, resp *resource.ReadResponse) {
+	var state LPKBuildModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if state.ID.IsNull() {
+		resp.State.RemoveResource(ctx)
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, &state)...)
+}
+
+func (r *LPKBuildResource) Update(ctx context.Context, req resource.UpdateRequest, resp *resource.UpdateResponse) {
+	if r.client == nil {
+		resp.Diagnostics.AddError("Provider not configured", "")
+		return
+	}
+	var plan, state LPKBuildModel
+	resp.Diagnostics.Append(req.Plan.Get(ctx, &plan)...)
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	result, err := r.applyBuild(ctx, &plan, &state)
+	if err != nil {
+		resp.Diagnostics.AddError("Build error", err.Error())
+		return
+	}
+	resp.Diagnostics.Append(resp.State.Set(ctx, result)...)
+}
+
+func (r *LPKBuildResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
+	var state LPKBuildModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+	if r.client != nil && !state.UploadID.IsNull() && state.UploadID.ValueString() != "" {
+		if err := r.client.DeleteLPK(ctx, state.UploadID.ValueString()); err != nil && !errors.Is(err, errNotFound) {
+			resp.Diagnostics.AddError("Delete upload failed", err.Error())
+			return
+		}
+	}
+	if !state.LocalPath.IsNull() && state.LocalPath.ValueString() != "" {
+		if err := os.Remove(state.LocalPath.ValueString()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			resp.Diagnostics.AddError("Remove artifact failed", err.Error())
+			return
+		}
+	}
+	resp.State.RemoveResource(ctx)
+}
+
+func (r *LPKBuildResource) applyBuild(ctx context.Context, data *LPKBuildModel, prior *LPKBuildModel) (*LPKBuildModel, error) {
+	workdir, cleanup, err := r.prepareSource(ctx, data.Source)
+	if err != nil {
+		return nil, fmt.Errorf("source error: %w", err)
 	}
 	if cleanup != nil {
 		defer cleanup()
@@ -214,13 +266,11 @@ func (d *LPKBuildDataSource) Read(ctx context.Context, req datasource.ReadReques
 	envVars := collectEnvVars(data.Env)
 	ext := resolveTemplateExtension(data.Env)
 	if err := renderTemplateFiles(workdir, ext, envVars); err != nil {
-		resp.Diagnostics.AddError("Template error", err.Error())
-		return
+		return nil, err
 	}
-	lpkPath, meta, err := d.runBuild(ctx, workdir, data.Build, data.Publish, envVars)
+	lpkPath, meta, err := r.runBuild(ctx, workdir, data.Build, data.Publish, envVars)
 	if err != nil {
-		resp.Diagnostics.AddError("Build error", err.Error())
-		return
+		return nil, err
 	}
 	data.LocalPath = types.StringValue(lpkPath)
 	data.AppID = types.StringValue(meta.AppID)
@@ -229,33 +279,40 @@ func (d *LPKBuildDataSource) Read(ctx context.Context, req datasource.ReadReques
 	data.LPKURL = types.StringNull()
 	data.UploadID = types.StringNull()
 	if shouldPublish(data.Publish) {
-		uploadName := meta.Name
-		if data.Publish != nil && !data.Publish.Name.IsNull() && data.Publish.Name.ValueString() != "" {
-			uploadName = data.Publish.Name.ValueString()
-		}
-		uploadVersion := meta.Version
-		if data.Publish != nil && !data.Publish.Version.IsNull() && data.Publish.Version.ValueString() != "" {
-			uploadVersion = data.Publish.Version.ValueString()
-		}
-		upload, err := d.client.UploadLPK(ctx, d.client.User, uploadName, uploadVersion, lpkPath)
-		if err != nil {
-			resp.Diagnostics.AddError("Upload error", err.Error())
-			return
-		}
-		data.LPKURL = types.StringValue(upload.DownloadURL)
-		data.UploadID = types.StringValue(upload.ID)
-		if upload.SHA256 != "" {
-			data.SHA256 = types.StringValue(upload.SHA256)
-		}
-		if upload.Version != "" {
-			data.Version = types.StringValue(upload.Version)
+		if canReuseUpload(prior, meta) {
+			data.LPKURL = prior.LPKURL
+			data.UploadID = prior.UploadID
+			if !prior.Version.IsNull() {
+				data.Version = prior.Version
+			}
+		} else {
+			uploadName := meta.Name
+			if data.Publish != nil && !data.Publish.Name.IsNull() && data.Publish.Name.ValueString() != "" {
+				uploadName = data.Publish.Name.ValueString()
+			}
+			uploadVersion := meta.Version
+			if data.Publish != nil && !data.Publish.Version.IsNull() && data.Publish.Version.ValueString() != "" {
+				uploadVersion = data.Publish.Version.ValueString()
+			}
+			upload, err := r.client.UploadLPK(ctx, r.client.User, uploadName, uploadVersion, lpkPath)
+			if err != nil {
+				return nil, fmt.Errorf("upload error: %w", err)
+			}
+			data.LPKURL = types.StringValue(upload.DownloadURL)
+			data.UploadID = types.StringValue(upload.ID)
+			if upload.SHA256 != "" {
+				data.SHA256 = types.StringValue(upload.SHA256)
+			}
+			if upload.Version != "" {
+				data.Version = types.StringValue(upload.Version)
+			}
 		}
 	}
 	data.ID = types.StringValue(fmt.Sprintf("%s-%s-%s", meta.AppID, meta.Version, meta.SHA256))
-	resp.Diagnostics.Append(resp.State.Set(ctx, &data)...)
+	return data, nil
 }
 
-func (d *LPKBuildDataSource) prepareSource(ctx context.Context, source *LPKBuildSourceModel) (string, func(), error) {
+func (r *LPKBuildResource) prepareSource(ctx context.Context, source *LPKBuildSourceModel) (string, func(), error) {
 	if source == nil {
 		return "", nil, errors.New("source block is required")
 	}
@@ -309,7 +366,7 @@ type lpkMetadata struct {
 	Name    string
 }
 
-func (d *LPKBuildDataSource) runBuild(ctx context.Context, path string, build *LPKBuildBuildModel, pub *LPKBuildPublishModel, envVars map[string]string) (string, *lpkMetadata, error) {
+func (r *LPKBuildResource) runBuild(ctx context.Context, path string, build *LPKBuildBuildModel, pub *LPKBuildPublishModel, envVars map[string]string) (string, *lpkMetadata, error) {
 	manifestPath := filepath.Join(path, "lzc-manifest.yml")
 	manifest, err := readManifest(manifestPath)
 	if err != nil {
@@ -547,4 +604,20 @@ func computeSHA(path string) (string, error) {
 		return "", err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func canReuseUpload(prior *LPKBuildModel, meta *lpkMetadata) bool {
+	if prior == nil {
+		return false
+	}
+	if prior.UploadID.IsNull() || prior.UploadID.ValueString() == "" {
+		return false
+	}
+	if prior.LPKURL.IsNull() || prior.LPKURL.ValueString() == "" {
+		return false
+	}
+	if prior.SHA256.IsNull() || prior.SHA256.ValueString() != meta.SHA256 {
+		return false
+	}
+	return true
 }

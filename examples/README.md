@@ -25,7 +25,7 @@ Use variables (or environment variables) to set those values so that the same co
 
 `examples/resources/lcmd_app/resource.tf` demonstrates an end-to-end workflow:
 
-1. `data "lcmd_lpk_build" "zitadel"` pulls a local Zitadel LPK source tree, renders any `*.tmpl` files with the provided `env.variables`, and uploads the artifact with `publish.enabled = true`.
-2. `resource "lcmd_app" "zitadel"` installs the freshly built package using the `lpk_url` emitted by the data source. Toggling the `zitadel_ephemeral` variable changes whether uninstalling the resource clears persisted app data.
+1. `resource "lcmd_lpk_build" "zitadel"` pulls a local Zitadel LPK source tree, renders any `*.tmpl` files with the provided `env.variables`, and uploads the artifact with `publish.enabled = true`.
+2. `resource "lcmd_app" "zitadel"` installs the freshly built package using the `lpk_url` emitted by the build resource. Toggling the `zitadel_ephemeral` variable changes whether uninstalling the resource clears persisted app data.
 
 Supplying variables such as `zitadel_source_path` and `zitadel_master_key` keeps secrets and file paths out of version control while still allowing the example to run unchanged.

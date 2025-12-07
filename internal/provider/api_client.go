@@ -244,3 +244,11 @@ func (c *LcmdClient) UploadLPK(ctx context.Context, uid, name, version, filePath
 	}
 	return &out, nil
 }
+
+func (c *LcmdClient) DeleteLPK(ctx context.Context, id string) error {
+	if c.User == "" {
+		return errors.New("user uid is not configured")
+	}
+	params := map[string]string{"uid": c.User}
+	return c.do(ctx, http.MethodDelete, path.Join("/v1/lpks", id), params, nil, nil)
+}

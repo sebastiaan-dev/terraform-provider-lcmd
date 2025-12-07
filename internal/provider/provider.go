@@ -101,6 +101,7 @@ func containsUID(users []apiUser, uid string) bool {
 func (p *LcmdProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		NewAppResource,
+		NewLPKBuildResource,
 	}
 }
 
@@ -109,9 +110,7 @@ func (p *LcmdProvider) EphemeralResources(ctx context.Context) []func() ephemera
 }
 
 func (p *LcmdProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
-	return []func() datasource.DataSource{
-		NewLPKBuildDataSource,
-	}
+	return nil
 }
 
 func (p *LcmdProvider) Functions(ctx context.Context) []func() function.Function {
